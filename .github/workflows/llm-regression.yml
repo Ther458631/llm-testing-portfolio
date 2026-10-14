@@ -1,0 +1,50 @@
+name: LLM Output Quality Regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # 1) 给检查器本身写回归测试：确认它既不误报（good 全过）、也不漏报（bad 全检出）
+  self-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+      - name: Run checkers self-test
+        run: python -m pytest -q
+
+  # 2) 离线跑完整套件：合规应答必须 100% 通过，否则视为套件失效
+  suite-mock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run suite against compliant mock
+        run: python run_suite.py --provider mock:good --report reports/report-mock-good.md --fail-on-fail
+
+  # 3) 断言测试设计文档与用例代码同源（防止有人改了用例却没更新文档）
+  design-doc-in-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Regenerate design doc
+        run: python run_suite.py --emit-design
+      - name: Fail if design doc is out of date
+        run: |
+          if ! git diff --quiet -- docs/test-design.md; then
+            echo "::error::docs/test-design.md 与 src/cases.py 不一致，请本地重新生成后提交"
+            git diff --stat -- docs/test-design.md
+            exit 1
+          fi
